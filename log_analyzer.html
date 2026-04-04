@@ -1,0 +1,1141 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>日志分析工具</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Microsoft YaHei', Arial, sans-serif;
+            background: #f5f5f5;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .header {
+            background: #2c3e50;
+            color: white;
+            padding: 8px 15px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .header h1 {
+            font-size: 16px;
+            margin: 0;
+            white-space: nowrap;
+        }
+
+        .btn-open {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 6px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: background 0.3s;
+            white-space: nowrap;
+        }
+
+        .btn-open:hover {
+            background: #2980b9;
+        }
+
+        .btn-open:disabled {
+            background: #95a5a6;
+            cursor: not-allowed;
+        }
+
+        .btn-mapping {
+            background: #27ae60;
+            color: white;
+            border: none;
+            padding: 6px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: background 0.3s;
+            white-space: nowrap;
+        }
+
+        .btn-mapping:hover {
+            background: #229954;
+        }
+
+        .btn-mapping.active {
+            background: #1e8449;
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);
+        }
+
+        .container {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        .left-panel {
+            width: 180px;
+            background: white;
+            border-right: 1px solid #ddd;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .panel-title {
+            background: #ecf0f1;
+            padding: 6px 10px;
+            font-weight: bold;
+            border-bottom: 1px solid #ddd;
+            font-size: 12px;
+        }
+
+        .thread-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+        }
+
+        .thread-item {
+            padding: 8px 12px;
+            margin-bottom: 5px;
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 13px;
+        }
+
+        .thread-item:hover {
+            background: #e3f2fd;
+            border-color: #3498db;
+        }
+
+        .thread-item.selected {
+            background: #3498db;
+            color: white;
+            border-color: #2980b9;
+        }
+
+        .right-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: white;
+            min-width: 200px;
+        }
+
+        .splitter {
+            width: 6px;
+            background: #ddd;
+            cursor: col-resize;
+            transition: background 0.2s;
+            flex-shrink: 0;
+        }
+
+        .splitter:hover {
+            background: #3498db;
+        }
+
+        .splitter.active {
+            background: #2980b9;
+        }
+
+        /* 防止拖动时选中文本 */
+        .container.dragging {
+            user-select: none;
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+        }
+
+        .right-panel .panel-title {
+            padding: 6px 10px;
+        }
+
+        .log-content {
+            flex: 1;
+            overflow: auto;
+            padding: 15px;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+
+        .log-line {
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        .log-line.stack-trace {
+            color: #569cd6;
+        }
+
+        .log-line.message {
+            color: #ce9178;
+        }
+
+        .empty-state {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #999;
+            font-size: 16px;
+        }
+
+        .stats {
+            padding: 8px 15px;
+            background: #f8f9fa;
+            border-top: 1px solid #ddd;
+            font-size: 12px;
+            color: #666;
+        }
+
+        #file-input {
+            display: none;
+        }
+
+        /* 树状显示样式 */
+        .tree-container {
+            padding: 10px;
+        }
+
+        .tree-node {
+            margin-left: 20px;
+        }
+
+        .tree-node-header {
+            display: flex;
+            align-items: center;
+            padding: 4px 8px;
+            margin: 2px 0;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .tree-node-header:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .tree-toggle {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            margin-right: 6px;
+            font-size: 10px;
+            transition: transform 0.2s;
+            color: #858585;
+        }
+
+        .tree-toggle.expanded {
+            transform: rotate(90deg);
+        }
+
+        .tree-toggle.spacer {
+            visibility: hidden;
+        }
+
+        .func-name {
+            color: #dcdcaa;
+            font-weight: bold;
+            font-size: 13px;
+        }
+
+        .file-info {
+            color: #6a9955;
+            font-size: 12px;
+            margin-left: 8px;
+        }
+
+        .file-name {
+            color: #dcdcaa;
+            font-weight: bold;
+        }
+
+        .line-number {
+            color: #f44747;
+            font-weight: bold;
+        }
+
+        .tree-messages {
+            margin-left: 30px;
+        }
+
+        .message-item {
+            padding: 2px 0;
+            font-size: 13px;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        .tree-children {
+            display: block;
+        }
+
+        /* 源代码查看器样式 */
+        .source-viewer {
+            display: none;
+            flex-direction: column;
+            background: #1e1e1e;
+            border-top: 2px solid #3498db;
+            max-height: 50vh;
+            overflow: hidden;
+        }
+
+        .source-viewer.visible {
+            display: flex;
+        }
+
+        .source-viewer-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 15px;
+            background: #2d2d2d;
+            border-bottom: 1px solid #3c3c3c;
+        }
+
+        .source-viewer-title {
+            color: #d4d4d4;
+            font-size: 13px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            flex: 1;
+        }
+
+        .source-viewer-close {
+            background: none;
+            border: none;
+            color: #d4d4d4;
+            font-size: 18px;
+            cursor: pointer;
+            padding: 0 8px;
+            line-height: 1;
+            transition: color 0.2s;
+        }
+
+        .source-viewer-close:hover {
+            color: #f44747;
+        }
+
+        .source-viewer-content {
+            flex: 1;
+            overflow: auto;
+            padding: 0;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 13px;
+            line-height: 1.6;
+            color: #d4d4d4;
+        }
+
+        .code-line {
+            display: flex;
+            padding: 0 15px;
+            white-space: pre;
+        }
+
+        .code-line:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .code-line.highlighted {
+            background: rgba(255, 255, 0, 0.3);
+            border-left: 3px solid #ffcc00;
+            padding-left: 12px;
+        }
+
+        .line-number-gutter {
+            display: inline-block;
+            width: 60px;
+            text-align: right;
+            padding-right: 15px;
+            color: #858585;
+            user-select: none;
+            flex-shrink: 0;
+        }
+
+        .line-content {
+            flex: 1;
+            white-space: pre;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>📊 日志分析工具</h1>
+        <button class="btn-open" id="btn-open">📂 打开日志文件</button>
+        <button class="btn-mapping" id="btn-mapping-dir">📁 映射目录</button>
+        <input type="file" id="file-input" accept=".log">
+        <input type="file" id="mapping-dir-input" webkitdirectory multiple style="display: none;">
+    </div>
+
+    <div class="container">
+        <div class="left-panel" id="left-panel">
+            <div class="panel-title">线程列表</div>
+            <div class="thread-list" id="thread-list">
+                <div class="empty-state">请先打开日志文件</div>
+            </div>
+            <div class="stats" id="thread-stats"></div>
+        </div>
+
+        <div class="splitter" id="splitter"></div>
+
+        <div class="right-panel">
+            <div class="panel-title">日志内容</div>
+            <div class="log-content" id="log-content">
+                <div class="empty-state">选择线程查看日志内容</div>
+            </div>
+            <div class="stats" id="log-stats"></div>
+            
+            <!-- 源代码查看器 -->
+            <div class="source-viewer" id="source-viewer">
+                <div class="source-viewer-header">
+                    <div class="source-viewer-title" id="source-viewer-title"></div>
+                    <button class="source-viewer-close" id="source-viewer-close">×</button>
+                </div>
+                <div class="source-viewer-content" id="source-viewer-content"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let allLines = [];
+        let threadMap = new Map();
+        let selectedThread = null;
+        let sourceFileCache = new Map(); // 缓存已读取的源文件
+        let mappingDirFiles = new Map(); // 映射目录文件缓存（存储 File 对象，不是内容）
+        const MAX_CACHED_FILES = 50; // LRU 缓存最大文件数
+
+        const btnOpen = document.getElementById('btn-open');
+        const fileInput = document.getElementById('file-input');
+        const btnMappingDir = document.getElementById('btn-mapping-dir');
+        const mappingDirInput = document.getElementById('mapping-dir-input');
+        const threadList = document.getElementById('thread-list');
+        const logContent = document.getElementById('log-content');
+        const threadStats = document.getElementById('thread-stats');
+        const logStats = document.getElementById('log-stats');
+        const sourceViewer = document.getElementById('source-viewer');
+        const sourceViewerTitle = document.getElementById('source-viewer-title');
+        const sourceViewerContent = document.getElementById('source-viewer-content');
+        const sourceViewerClose = document.getElementById('source-viewer-close');
+
+        // 可拖动分隔条
+        const splitter = document.getElementById('splitter');
+        const leftPanel = document.getElementById('left-panel');
+        let isDragging = false;
+
+        splitter.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            splitter.classList.add('active');
+            document.body.style.cursor = 'col-resize';
+            document.body.style.userSelect = 'none';
+            e.preventDefault();
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            const containerRect = document.querySelector('.container').getBoundingClientRect();
+            const newWidth = e.clientX - containerRect.left;
+            const minWidth = 120;
+            const maxWidth = containerRect.width - 200;
+            if (newWidth >= minWidth && newWidth <= maxWidth) {
+                leftPanel.style.width = newWidth + 'px';
+            }
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (isDragging) {
+                isDragging = false;
+                splitter.classList.remove('active');
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+            }
+        });
+
+        btnOpen.addEventListener('click', () => {
+            fileInput.click();
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const content = event.target.result;
+                parseLogFile(content);
+                renderThreadList();
+                logContent.innerHTML = '<div class="empty-state">选择线程查看日志内容</div>';
+                logStats.textContent = '';
+            };
+            reader.readAsText(file);
+        });
+
+        // 映射目录按钮事件（延迟加载 + 文件类型过滤 + 数量限制）
+        btnMappingDir.addEventListener('click', () => {
+            mappingDirInput.click();
+        });
+
+        mappingDirInput.addEventListener('change', (e) => {
+            const files = Array.from(e.target.files);
+            if (files.length === 0) return;
+
+            // 方案 2：文件类型过滤 - 只允许 .py 文件
+            const allowedExtensions = ['.py'];
+            const filteredFiles = files.filter(file => {
+                const ext = file.name.toLowerCase();
+                return allowedExtensions.some(allowed => ext.endsWith(allowed));
+            });
+
+            if (filteredFiles.length === 0) {
+                alert('未找到 .py 文件，请选择包含 Python 文件的目录');
+                return;
+            }
+
+            // 方案 3：限制最大文件数
+            const MAX_FILES = 1000;
+            let filesToLoad = filteredFiles;
+            let skippedCount = 0;
+            
+            if (filteredFiles.length > MAX_FILES) {
+                skippedCount = filteredFiles.length - MAX_FILES;
+                filesToLoad = filteredFiles.slice(0, MAX_FILES);
+            }
+
+            // 方案 4：限制文件大小（5MB）
+            const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+            let oversizedFiles = [];
+            filesToLoad = filesToLoad.filter(file => {
+                if (file.size > MAX_FILE_SIZE) {
+                    oversizedFiles.push(file.name);
+                    return false;
+                }
+                return true;
+            });
+
+            mappingDirFiles.clear();
+
+            // 方案 1：延迟加载 - 只存储 File 对象引用，不读取内容
+            filesToLoad.forEach(file => {
+                const relativePath = file.webkitRelativePath || file.name;
+                mappingDirFiles.set(relativePath, file);  // 存储 File 对象，不是内容
+            });
+
+            // 更新 UI
+            btnMappingDir.classList.add('active');
+            let message = `📁 映射目录 (${filesToLoad.length} 文件)`;
+            btnMappingDir.textContent = message;
+
+            // 显示统计信息
+            let statsMessage = `成功加载 ${filesToLoad.length} 个 .py 文件`;
+            if (skippedCount > 0) {
+                statsMessage += `\n跳过 ${skippedCount} 个文件（超过 ${MAX_FILES} 限制）`;
+            }
+            if (oversizedFiles.length > 0) {
+                statsMessage += `\n跳过 ${oversizedFiles.length} 个大文件（>5MB）`;
+            }
+            alert(statsMessage);
+        });
+
+        function parseLogFile(content) {
+            allLines = content.split('\n').filter(line => line.trim());
+            threadMap.clear();
+
+            const threadIdRegex = /^tid:(\d+)\|/;
+
+            for (const line of allLines) {
+                const match = line.match(threadIdRegex);
+                if (match) {
+                    const threadId = match[1];
+                    if (!threadMap.has(threadId)) {
+                        threadMap.set(threadId, []);
+                    }
+                    threadMap.get(threadId).push(line);
+                }
+            }
+        }
+
+        function renderThreadList() {
+            threadList.innerHTML = '';
+
+            if (threadMap.size === 0) {
+                threadList.innerHTML = '<div class="empty-state">未找到线程</div>';
+                threadStats.textContent = '';
+                return;
+            }
+
+            const sortedThreads = Array.from(threadMap.keys()).sort();
+
+            sortedThreads.forEach(threadId => {
+                const item = document.createElement('div');
+                item.className = 'thread-item';
+                item.textContent = `tid:${threadId}`;
+                item.dataset.threadId = threadId;
+
+                item.addEventListener('click', () => {
+                    selectThread(threadId);
+                });
+
+                threadList.appendChild(item);
+            });
+
+            threadStats.textContent = `共 ${threadMap.size} 个线程`;
+        }
+
+        function selectThread(threadId) {
+            selectedThread = threadId;
+
+            document.querySelectorAll('.thread-item').forEach(item => {
+                item.classList.remove('selected');
+            });
+
+            const selectedItem = document.querySelector(`[data-thread-id="${threadId}"]`);
+            if (selectedItem) {
+                selectedItem.classList.add('selected');
+            }
+
+            renderLogContent(threadId);
+        }
+
+        function renderLogContent(threadId) {
+            const lines = threadMap.get(threadId) || [];
+            logContent.innerHTML = '';
+
+            if (lines.length === 0) {
+                logContent.innerHTML = '<div class="empty-state">无线程日志</div>';
+                logStats.textContent = '';
+                return;
+            }
+
+            const threadIdRegex = /^tid:(\d+)\|/;
+            const treeRoot = buildCallTree(lines, threadIdRegex);
+            
+            const treeContainer = document.createElement('div');
+            treeContainer.className = 'tree-container';
+            renderTree(treeRoot, treeContainer);
+            logContent.appendChild(treeContainer);
+
+            const totalNodes = countTreeNodes(treeRoot);
+            logStats.textContent = `共 ${totalNodes} 个节点`;
+        }
+
+        function buildCallTree(lines, threadIdRegex) {
+            const root = { name: 'root', children: [], messages: [], depth: -1 };
+            let lastNode = root;
+            let lastStackTrace = [];
+            // 维护一个路径栈，用于追踪当前节点的所有祖先
+            let pathNodes = []; // pathNodes[i] 表示深度为 i 的节点
+
+            lines.forEach(line => {
+                const match = line.match(threadIdRegex);
+                if (!match) return;
+
+                const content = line.substring(match[0].length);
+                
+                if (content.includes('@') && content.includes('#')) {
+                    const stackTrace = parseStackTrace(content);
+                    
+                    // 与前一个调用栈比较，找到第一个不同的位置
+                    // 比较完整的调用信息（函数名+文件路径+行号），只要有任何不同就视为不一致
+                    let diffIndex = 0;
+                    for (let i = 0; i < Math.min(stackTrace.length, lastStackTrace.length); i++) {
+                        const currentFull = `${stackTrace[i].name}@${stackTrace[i].filePath}@${stackTrace[i].lineNum}`;
+                        const lastFull = `${lastStackTrace[i].name}@${lastStackTrace[i].filePath}@${lastStackTrace[i].lineNum}`;
+                        if (currentFull === lastFull) {
+                            diffIndex = i + 1;
+                        } else {
+                            break;
+                        }
+                    }
+                    
+                    // 确定父节点
+                    let parentNode;
+                    if (diffIndex === 0) {
+                        // 从根节点开始就不同
+                        parentNode = root;
+                        pathNodes = [];
+                    } else {
+                        // 找到 diffIndex-1 深度的节点
+                        if (diffIndex - 1 < pathNodes.length) {
+                            parentNode = pathNodes[diffIndex - 1];
+                            // 截断路径
+                            pathNodes = pathNodes.slice(0, diffIndex);
+                        } else {
+                            // 理论上不应该到这里
+                            parentNode = root;
+                            pathNodes = [];
+                        }
+                    }
+                    
+                    // 从 diffIndex 开始创建新节点
+                    for (let i = diffIndex; i < stackTrace.length; i++) {
+                        const newNode = {
+                            name: stackTrace[i].name,
+                            children: [],
+                            messages: [],
+                            depth: i,
+                            filePath: stackTrace[i].filePath,
+                            lineNum: stackTrace[i].lineNum,
+                            fullName: `${stackTrace[i].name}@${stackTrace[i].filePath}@${stackTrace[i].lineNum}`
+                        };
+                        parentNode.children.push(newNode);
+                        pathNodes.push(newNode);
+                        parentNode = newNode;
+                    }
+                    
+                    lastNode = pathNodes.length > 0 ? pathNodes[pathNodes.length - 1] : root;
+                    lastStackTrace = stackTrace;
+                } else {
+                    // 用户信息行，附加到最近的调用栈节点
+                    if (lastNode !== root) {
+                        lastNode.messages.push(content);
+                    }
+                }
+            });
+
+            return root;
+        }
+
+        function parseStackTrace(stackTrace) {
+            // 去除末尾的 # 和空白
+            stackTrace = stackTrace.replace(/#+\s*$/, '');
+            
+            const parts = stackTrace.split('#').filter(p => p.trim());
+            return parts.map(part => {
+                const segments = part.split('@');
+                if (segments.length >= 3) {
+                    return {
+                        name: segments[0],
+                        filePath: segments[1],
+                        lineNum: segments[2]
+                    };
+                }
+                return { name: part, filePath: '', lineNum: '' };
+            });
+        }
+
+        function renderTree(node, container) {
+            if (node.name !== 'root') {
+                const nodeElement = createTreeNode(node);
+                container.appendChild(nodeElement);
+            }
+
+            if (node.children.length > 0) {
+                let childrenContainer;
+                if (node.name === 'root') {
+                    childrenContainer = document.createElement('div');
+                    childrenContainer.className = 'tree-children';
+                    container.appendChild(childrenContainer);
+                } else {
+                    const nodeElement = container.lastChild;
+                    childrenContainer = nodeElement.querySelector(':scope > .tree-children');
+                }
+
+                if (childrenContainer) {
+                    node.children.forEach(child => {
+                        renderTree(child, childrenContainer);
+                    });
+                }
+            }
+        }
+
+        function createTreeNode(node) {
+            const nodeElement = document.createElement('div');
+            nodeElement.className = 'tree-node';
+
+            const nodeHeader = document.createElement('div');
+            nodeHeader.className = 'tree-node-header';
+
+            const hasChildren = node.children.length > 0;
+
+            if (hasChildren) {
+                const toggle = document.createElement('span');
+                toggle.className = 'tree-toggle';
+                toggle.textContent = '▶';
+                
+                const childrenContainer = document.createElement('div');
+                childrenContainer.className = 'tree-children';
+                childrenContainer.style.display = 'none';
+                
+                toggle.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const isExpanded = toggle.classList.contains('expanded');
+                    toggle.classList.toggle('expanded');
+                    childrenContainer.style.display = isExpanded ? 'none' : 'block';
+                });
+                
+                nodeHeader.appendChild(toggle);
+                nodeElement.appendChild(nodeHeader);
+                nodeElement.appendChild(childrenContainer);
+            } else {
+                const spacer = document.createElement('span');
+                spacer.className = 'tree-toggle spacer';
+                spacer.textContent = ' ';
+                nodeHeader.appendChild(spacer);
+                nodeElement.appendChild(nodeHeader);
+            }
+
+            const funcName = document.createElement('span');
+            funcName.className = 'func-name';
+            funcName.textContent = node.name;
+            nodeHeader.appendChild(funcName);
+
+            if (node.fullName) {
+                const fullNameText = node.fullName.replace(/\s+/g, ' ').trim();
+                if (fullNameText && fullNameText !== '@@') {
+                    // 解析 fullName: 函数名@文件路径@行号
+                    const parts = fullNameText.split('@');
+                    if (parts.length >= 3) {
+                        const funcName_part = parts[0];
+                        const lineNum = parts[parts.length - 1];
+                        // 文件路径是中间的部分（可能包含@，所以取第1到倒数第2个）
+                        const filePath = parts.slice(1, -1).join('@');
+                        
+                        // 分离目录路径和文件名
+                        const pathParts = filePath.split(/[\\/]/);
+                        const fileName = pathParts.pop();
+                        const dirPath = pathParts.join('/');
+
+                        const fileInfoSpan = document.createElement('span');
+                        fileInfoSpan.className = 'file-info';
+
+                        // 左括号
+                        const openParen = document.createTextNode(' (');
+                        fileInfoSpan.appendChild(openParen);
+
+                        // 目录路径（默认灰色）
+                        if (dirPath) {
+                            const dirSpan = document.createElement('span');
+                            dirSpan.className = 'dir-path';
+                            dirSpan.style.color = '#808080';
+                            dirSpan.textContent = dirPath + '/';
+                            fileInfoSpan.appendChild(dirSpan);
+                        }
+
+                        // 文件名（黄色，可点击）
+                        const fileNameSpan = document.createElement('span');
+                        fileNameSpan.className = 'file-name';
+                        fileNameSpan.style.color = '#dcdcaa';
+                        fileNameSpan.style.fontWeight = 'bold';
+                        fileNameSpan.style.cursor = 'pointer';
+                        fileNameSpan.style.textDecoration = 'underline';
+                        fileNameSpan.textContent = fileName;
+                        
+                        // 添加点击事件，打开源代码查看器
+                        fileNameSpan.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            const fullFilePath = parts.slice(1, -1).join('@');
+                            const targetLineNum = parts[parts.length - 1];
+                            showSourceFile(fullFilePath, targetLineNum);
+                        });
+                        
+                        fileInfoSpan.appendChild(fileNameSpan);
+
+                        // 冒号
+                        const colon = document.createTextNode(':');
+                        fileInfoSpan.appendChild(colon);
+
+                        // 行号（红色）
+                        const lineNumSpan = document.createElement('span');
+                        lineNumSpan.className = 'line-number';
+                        lineNumSpan.style.color = '#ff4444';
+                        lineNumSpan.style.fontWeight = 'bold';
+                        lineNumSpan.textContent = lineNum;
+                        fileInfoSpan.appendChild(lineNumSpan);
+
+                        // 右括号
+                        const closeParen = document.createTextNode(')');
+                        fileInfoSpan.appendChild(closeParen);
+
+                        nodeHeader.appendChild(fileInfoSpan);
+                    }
+                }
+            }
+
+            if (node.messages.length > 0) {
+                const messagesContainer = document.createElement('div');
+                messagesContainer.className = 'tree-messages';
+                
+                node.messages.forEach(msg => {
+                    if (msg.trim() !== '') {
+                        const msgElement = document.createElement('div');
+                        msgElement.className = 'message-item';
+                        msgElement.textContent = msg;
+                        messagesContainer.appendChild(msgElement);
+                    }
+                });
+
+                if (messagesContainer.children.length > 0) {
+                    nodeElement.appendChild(messagesContainer);
+                }
+            }
+
+            return nodeElement;
+        }
+
+        function countTreeNodes(node) {
+            let count = node.name !== 'root' ? 1 : 0;
+            node.children.forEach(child => {
+                count += countTreeNodes(child);
+            });
+            count += node.messages.length;
+            return count;
+        }
+
+        // 源代码查看器相关功能
+        sourceViewerClose.addEventListener('click', () => {
+            sourceViewer.classList.remove('visible');
+        });
+
+        /**
+         * 显示源代码文件
+         * @param {string} filePath - 文件完整路径
+         * @param {number} lineNumber - 要高亮的行号
+         */
+        async function showSourceFile(filePath, lineNumber) {
+            // 显示查看器
+            sourceViewer.classList.add('visible');
+            sourceViewerTitle.textContent = `${filePath} (行 ${lineNumber})`;
+
+            // 检查缓存
+            if (sourceFileCache.has(filePath)) {
+                const content = sourceFileCache.get(filePath);
+                renderSourceContent(content, filePath, lineNumber);
+                return;
+            }
+
+            // 显示加载提示
+            sourceViewerContent.innerHTML = '<div style="padding: 20px; text-align: center; color: #858585;">正在加载文件...</div>';
+
+            try {
+                // 读取文件内容
+                const content = await readFileContent(filePath);
+                sourceFileCache.set(filePath, content);
+                renderSourceContent(content, filePath, lineNumber);
+            } catch (error) {
+                sourceViewerContent.innerHTML = `<div style="padding: 20px; color: #f44747;">无法读取文件: ${error.message}</div>`;
+            }
+        }
+
+        /**
+         * 读取本地文件内容
+         * 注意：由于浏览器安全限制，这里使用 File API
+         * 用户需要通过文件选择器手动选择源文件，或者使用其他方法
+         */
+        async function readFileContent(filePath) {
+            // 由于浏览器安全限制，无法直接读取本地文件
+            // 这里提供一个提示，要求用户手动选择文件
+            // 在实际应用中，可能需要通过服务器API或Electron等桌面应用框架来实现
+            
+            // 这里我们使用一个占位符，实际使用时需要替换为真实的文件读取逻辑
+            throw new Error('浏览器环境无法直接读取本地文件，请使用文件选择器打开源文件');
+        }
+
+        /**
+         * 渲染源代码内容
+         */
+        function renderSourceContent(content, filePath, highlightLine) {
+            const lines = content.split('\n');
+            sourceViewerContent.innerHTML = '';
+
+            lines.forEach((line, index) => {
+                const lineNum = index + 1;
+                const lineElement = document.createElement('div');
+                lineElement.className = 'code-line';
+
+                // 高亮目标行
+                if (lineNum === parseInt(highlightLine)) {
+                    lineElement.classList.add('highlighted');
+                }
+
+                const lineNumGutter = document.createElement('span');
+                lineNumGutter.className = 'line-number-gutter';
+                lineNumGutter.textContent = lineNum;
+
+                const lineContent = document.createElement('span');
+                lineContent.className = 'line-content';
+                lineContent.textContent = line;
+
+                lineElement.appendChild(lineNumGutter);
+                lineElement.appendChild(lineContent);
+                sourceViewerContent.appendChild(lineElement);
+            });
+
+            // 滚动到高亮行，使其位于中间位置
+            setTimeout(() => {
+                const highlightedLine = sourceViewerContent.querySelector('.code-line.highlighted');
+                if (highlightedLine) {
+                    const containerRect = sourceViewerContent.getBoundingClientRect();
+                    const lineRect = highlightedLine.getBoundingClientRect();
+                    const scrollTop = sourceViewerContent.scrollTop;
+                    const targetPosition = scrollTop + lineRect.top - containerRect.top - containerRect.height / 2 + lineRect.height / 2;
+                    
+                    sourceViewerContent.scrollTo({
+                        top: targetPosition,
+                        behavior: 'smooth'
+                    });
+                }
+            }, 100);
+        }
+
+        /**
+         * 打开文件选择器以加载源文件
+         */
+        function openSourceFilePicker() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.multiple = false;
+            input.accept = '.py,.js,.html,.css,.txt,.md,.json,.xml,.csv';
+
+            input.onchange = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    const content = event.target.result;
+                    // 这里需要知道当前查看的文件路径和行号
+                    // 我们将在调用showSourceFile时保存这些信息
+                    const currentFilePath = sourceViewerTitle.dataset.filePath;
+                    const currentLine = sourceViewerTitle.dataset.lineNumber;
+                    
+                    if (currentFilePath) {
+                        sourceFileCache.set(currentFilePath, content);
+                        renderSourceContent(content, currentFilePath, currentLine);
+                    }
+                };
+                reader.readAsText(file);
+            };
+
+            input.click();
+        }
+
+        // 修改showSourceFile函数，支持延迟加载和 LRU 缓存
+        async function showSourceFile(filePath, lineNumber) {
+            // 显示查看器
+            sourceViewer.classList.add('visible');
+            sourceViewerTitle.textContent = `${filePath} (行 ${lineNumber})`;
+            sourceViewerTitle.dataset.filePath = filePath;
+            sourceViewerTitle.dataset.lineNumber = lineNumber;
+
+            // 检查缓存
+            if (sourceFileCache.has(filePath)) {
+                const content = sourceFileCache.get(filePath);
+                renderSourceContent(content, filePath, lineNumber);
+                return;
+            }
+
+            // 尝试从已加载的映射目录中查找文件
+            // 提取文件名的最后部分用于匹配
+            const fileName = filePath.split(/[\\/]/).pop();
+            let fileObj = null;
+            let foundPath = null;
+
+            // 从映射目录查找（现在存储的是 File 对象）
+            for (const [path, file] of mappingDirFiles) {
+                if (path.endsWith(fileName) || path.includes(filePath)) {
+                    fileObj = file;
+                    foundPath = path;
+                    break;
+                }
+            }
+
+            // 如果找到了文件对象，延迟读取内容
+            if (fileObj) {
+                sourceViewerContent.innerHTML = '<div style="padding: 20px; text-align: center; color: #858585;">正在加载文件...</div>';
+                
+                try {
+                    const content = await new Promise((resolve, reject) => {
+                        const reader = new FileReader();
+                        reader.onload = (e) => resolve(e.target.result);
+                        reader.onerror = (e) => reject(new Error('读取文件失败'));
+                        reader.readAsText(fileObj);
+                    });
+
+                    // LRU 缓存管理：如果缓存已满，删除最旧的条目
+                    if (sourceFileCache.size >= MAX_CACHED_FILES) {
+                        const firstKey = sourceFileCache.keys().next().value;
+                        sourceFileCache.delete(firstKey);
+                    }
+                    
+                    sourceFileCache.set(filePath, content);
+                    renderSourceContent(content, filePath, lineNumber);
+                    return;
+                } catch (error) {
+                    sourceViewerContent.innerHTML = `<div style="padding: 20px; color: #f44747;">无法读取文件: ${error.message}</div>`;
+                    return;
+                }
+            }
+
+            // 显示加载提示和操作按钮
+            sourceViewerContent.innerHTML = `
+                <div style="padding: 20px; text-align: center;">
+                    <div style="color: #858585; margin-bottom: 15px;">
+                        文件路径: ${filePath}<br>
+                        目标行号: ${lineNumber}
+                    </div>
+                    <div style="color: #ce9178; margin-bottom: 15px;">
+                        未在映射目录中找到该文件<br>
+                        请点击下方按钮手动选择源文件
+                    </div>
+                    <button id="btn-load-file" style="
+                        background: #3498db;
+                        color: white;
+                        border: none;
+                        padding: 8px 20px;
+                        border-radius: 4px;
+                        cursor: pointer;
+                        font-size: 13px;
+                    ">📂 选择源文件</button>
+                </div>
+            `;
+
+            document.getElementById('btn-load-file').addEventListener('click', () => {
+                const input = document.createElement('input');
+                input.type = 'file';
+                input.multiple = false;
+                input.accept = '.py';
+
+                input.onchange = (e) => {
+                    const file = e.target.files[0];
+                    if (!file) return;
+
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                        const content = event.target.result;
+                        
+                        // LRU 缓存管理
+                        if (sourceFileCache.size >= MAX_CACHED_FILES) {
+                            const firstKey = sourceFileCache.keys().next().value;
+                            sourceFileCache.delete(firstKey);
+                        }
+                        
+                        sourceFileCache.set(filePath, content);
+                        renderSourceContent(content, filePath, lineNumber);
+                    };
+                    reader.readAsText(file);
+                };
+
+                input.click();
+            });
+        }
+    </script>
+</body>
+</html>
