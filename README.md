@@ -36,6 +36,7 @@ tid:2136|func_a@...@45#func_b@...           │   ├─ ▶ func_t()
 tid:2136|▶ Enter: func_b                    │   │   ├─ ▶ func_q()
 ...                                          │   │   │   └─ ...
 ```
+<img width="958" height="473" alt="image" src="https://github.com/user-attachments/assets/04433e04-53bc-4665-94d7-11be9efc5162" />
 
 **Fully aligned with actual code execution! No more repetitive debugging or cross-referencing. The program automatically displays runtime call relationships in a clear tree diagram!**
 
