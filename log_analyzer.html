@@ -416,11 +416,17 @@
     </div>
 
     <script>
+        // ===== Electron 环境检测 =====
+        const isElectron = !!(window.electronAPI);
+        console.log('=== 环境检测 ===');
+        console.log('isElectron:', isElectron);
+        console.log('window.electronAPI:', window.electronAPI);
+
         let allLines = [];
         let threadMap = new Map();
         let selectedThread = null;
         let sourceFileCache = new Map(); // 缓存已读取的源文件
-        let mappingDirFiles = new Map(); // 映射目录文件缓存（存储 File 对象，不是内容）
+        let mappingDirFiles = new Map(); // 映射目录文件缓存（Electron: {relativePath: {absolutePath, fileName, size}}）
         const MAX_CACHED_FILES = 50; // LRU 缓存最大文件数
 
         const btnOpen = document.getElementById('btn-open');
@@ -469,10 +475,35 @@
             }
         });
 
-        btnOpen.addEventListener('click', () => {
+        // ===== 打开日志文件 =====
+        btnOpen.addEventListener('click', async () => {
+          console.log('=== 按钮点击 ===');
+          console.log('isElectron:', isElectron);
+          if (isElectron) {
+            // Electron 环境：使用原生对话框
+            try {
+              console.log('准备调用 window.electronAPI.openLogFile()...');
+              const result = await window.electronAPI.openLogFile();
+              console.log('openLogFile 返回:', result);
+              if (!result) { console.log('用户取消了选择'); return; }
+              if (!result.content) { console.error('文件内容为空!', result); return; }
+              console.log('文件大小:', result.content.length, '字符');
+              parseLogFile(result.content);
+              console.log('线程数:', threadMap.size);
+              renderThreadList();
+              logContent.innerHTML = '<div class="empty-state">选择线程查看日志内容</div>';
+              logStats.textContent = '';
+            } catch (err) {
+              console.error('打开文件异常:', err);
+              alert('打开文件失败: ' + err.message);
+            }
+          } else {
+            // 浏览器环境：使用 input 元素
             fileInput.click();
+          }
         });
 
+        // 浏览器环境的文件 input 回调
         fileInput.addEventListener('change', (e) => {
             const file = e.target.files[0];
             if (!file) return;
@@ -488,16 +519,43 @@
             reader.readAsText(file);
         });
 
-        // 映射目录按钮事件（延迟加载 + 文件类型过滤 + 数量限制）
-        btnMappingDir.addEventListener('click', () => {
+        // ===== 映射目录按钮事件 =====
+        btnMappingDir.addEventListener('click', async () => {
+          if (isElectron) {
+            // Electron 环境：使用原生目录选择
+            try {
+              const result = await window.electronAPI.selectMappingDirectory();
+              if (!result) return;
+
+              mappingDirFiles.clear();
+
+              // 存储文件信息（绝对路径），后续通过 absolutePath 直接读取
+              result.files.forEach(fileInfo => {
+                mappingDirFiles.set(fileInfo.relativePath, fileInfo);
+                // 同时用绝对路径作为键，方便查找
+                mappingDirFiles.set(fileInfo.absolutePath, fileInfo);
+              });
+
+              // 更新 UI
+              btnMappingDir.classList.add('active');
+              let message = `📁 映射目录 (${result.totalScanned} 文件)`;
+              btnMappingDir.textContent = message;
+
+              alert(`成功加载 ${result.totalScanned} 个 .py 文件\n目录: ${result.dirPath}`);
+            } catch (err) {
+              alert('选择目录失败: ' + err.message);
+            }
+          } else {
+            // 浏览器环境：使用 input 元素
             mappingDirInput.click();
+          }
         });
 
         mappingDirInput.addEventListener('change', (e) => {
             const files = Array.from(e.target.files);
             if (files.length === 0) return;
 
-            // 方案 2：文件类型过滤 - 只允许 .py 文件
+            // 文件类型过滤 - 只允许 .py 文件
             const allowedExtensions = ['.py'];
             const filteredFiles = files.filter(file => {
                 const ext = file.name.toLowerCase();
@@ -509,17 +567,17 @@
                 return;
             }
 
-            // 方案 3：限制最大文件数
+            // 限制最大文件数
             const MAX_FILES = 1000;
             let filesToLoad = filteredFiles;
             let skippedCount = 0;
-            
+
             if (filteredFiles.length > MAX_FILES) {
                 skippedCount = filteredFiles.length - MAX_FILES;
                 filesToLoad = filteredFiles.slice(0, MAX_FILES);
             }
 
-            // 方案 4：限制文件大小（5MB）
+            // 限制文件大小（5MB）
             const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
             let oversizedFiles = [];
             filesToLoad = filesToLoad.filter(file => {
@@ -532,10 +590,10 @@
 
             mappingDirFiles.clear();
 
-            // 方案 1：延迟加载 - 只存储 File 对象引用，不读取内容
+            // 浏览器环境：存储 File 对象引用
             filesToLoad.forEach(file => {
                 const relativePath = file.webkitRelativePath || file.name;
-                mappingDirFiles.set(relativePath, file);  // 存储 File 对象，不是内容
+                mappingDirFiles.set(relativePath, file);
             });
 
             // 更新 UI
@@ -905,129 +963,51 @@
         });
 
         /**
+         * 渲染源代码内容，带行号和高亮
+         * @param {string} content - 文件内容
+         * @param {string} filePath - 文件路径
+         * @param {number} targetLine - 要高亮的行号
+         */
+        function renderSourceContent(content, filePath, targetLine) {
+            const lines = content.split('\n');
+            const startLine = Math.max(0, targetLine - 10);
+            const endLine = Math.min(lines.length, targetLine + 10);
+
+            let html = '';
+            for (let i = startLine; i < endLine; i++) {
+                const lineNum = i + 1;
+                const lineContent = escapeHtml(lines[i] || '');
+                const isTarget = lineNum === parseInt(targetLine);
+
+                html += `<div class="code-line ${isTarget ? 'highlighted' : ''}" data-line="${lineNum}">
+                    <span class="line-number-gutter">${lineNum}</span>
+                    <span class="line-content">${lineContent}</span>
+                </div>`;
+            }
+
+            sourceViewerContent.innerHTML = html;
+
+            // 滚动到高亮行
+            const highlightedLine = sourceViewerContent.querySelector('.code-line.highlighted');
+            if (highlightedLine) {
+                highlightedLine.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+        }
+
+        /**
+         * 转义 HTML 特殊字符
+         */
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        /**
          * 显示源代码文件
          * @param {string} filePath - 文件完整路径
          * @param {number} lineNumber - 要高亮的行号
          */
-        async function showSourceFile(filePath, lineNumber) {
-            // 显示查看器
-            sourceViewer.classList.add('visible');
-            sourceViewerTitle.textContent = `${filePath} (行 ${lineNumber})`;
-
-            // 检查缓存
-            if (sourceFileCache.has(filePath)) {
-                const content = sourceFileCache.get(filePath);
-                renderSourceContent(content, filePath, lineNumber);
-                return;
-            }
-
-            // 显示加载提示
-            sourceViewerContent.innerHTML = '<div style="padding: 20px; text-align: center; color: #858585;">正在加载文件...</div>';
-
-            try {
-                // 读取文件内容
-                const content = await readFileContent(filePath);
-                sourceFileCache.set(filePath, content);
-                renderSourceContent(content, filePath, lineNumber);
-            } catch (error) {
-                sourceViewerContent.innerHTML = `<div style="padding: 20px; color: #f44747;">无法读取文件: ${error.message}</div>`;
-            }
-        }
-
-        /**
-         * 读取本地文件内容
-         * 注意：由于浏览器安全限制，这里使用 File API
-         * 用户需要通过文件选择器手动选择源文件，或者使用其他方法
-         */
-        async function readFileContent(filePath) {
-            // 由于浏览器安全限制，无法直接读取本地文件
-            // 这里提供一个提示，要求用户手动选择文件
-            // 在实际应用中，可能需要通过服务器API或Electron等桌面应用框架来实现
-            
-            // 这里我们使用一个占位符，实际使用时需要替换为真实的文件读取逻辑
-            throw new Error('浏览器环境无法直接读取本地文件，请使用文件选择器打开源文件');
-        }
-
-        /**
-         * 渲染源代码内容
-         */
-        function renderSourceContent(content, filePath, highlightLine) {
-            const lines = content.split('\n');
-            sourceViewerContent.innerHTML = '';
-
-            lines.forEach((line, index) => {
-                const lineNum = index + 1;
-                const lineElement = document.createElement('div');
-                lineElement.className = 'code-line';
-
-                // 高亮目标行
-                if (lineNum === parseInt(highlightLine)) {
-                    lineElement.classList.add('highlighted');
-                }
-
-                const lineNumGutter = document.createElement('span');
-                lineNumGutter.className = 'line-number-gutter';
-                lineNumGutter.textContent = lineNum;
-
-                const lineContent = document.createElement('span');
-                lineContent.className = 'line-content';
-                lineContent.textContent = line;
-
-                lineElement.appendChild(lineNumGutter);
-                lineElement.appendChild(lineContent);
-                sourceViewerContent.appendChild(lineElement);
-            });
-
-            // 滚动到高亮行，使其位于中间位置
-            setTimeout(() => {
-                const highlightedLine = sourceViewerContent.querySelector('.code-line.highlighted');
-                if (highlightedLine) {
-                    const containerRect = sourceViewerContent.getBoundingClientRect();
-                    const lineRect = highlightedLine.getBoundingClientRect();
-                    const scrollTop = sourceViewerContent.scrollTop;
-                    const targetPosition = scrollTop + lineRect.top - containerRect.top - containerRect.height / 2 + lineRect.height / 2;
-                    
-                    sourceViewerContent.scrollTo({
-                        top: targetPosition,
-                        behavior: 'smooth'
-                    });
-                }
-            }, 100);
-        }
-
-        /**
-         * 打开文件选择器以加载源文件
-         */
-        function openSourceFilePicker() {
-            const input = document.createElement('input');
-            input.type = 'file';
-            input.multiple = false;
-            input.accept = '.py,.js,.html,.css,.txt,.md,.json,.xml,.csv';
-
-            input.onchange = (e) => {
-                const file = e.target.files[0];
-                if (!file) return;
-
-                const reader = new FileReader();
-                reader.onload = (event) => {
-                    const content = event.target.result;
-                    // 这里需要知道当前查看的文件路径和行号
-                    // 我们将在调用showSourceFile时保存这些信息
-                    const currentFilePath = sourceViewerTitle.dataset.filePath;
-                    const currentLine = sourceViewerTitle.dataset.lineNumber;
-                    
-                    if (currentFilePath) {
-                        sourceFileCache.set(currentFilePath, content);
-                        renderSourceContent(content, currentFilePath, currentLine);
-                    }
-                };
-                reader.readAsText(file);
-            };
-
-            input.click();
-        }
-
-        // 修改showSourceFile函数，支持延迟加载和 LRU 缓存
         async function showSourceFile(filePath, lineNumber) {
             // 显示查看器
             sourceViewer.classList.add('visible');
@@ -1042,39 +1022,70 @@
                 return;
             }
 
-            // 尝试从已加载的映射目录中查找文件
-            // 提取文件名的最后部分用于匹配
+            // ===== 尝试从已映射的目录中查找文件 =====
             const fileName = filePath.split(/[\\/]/).pop();
-            let fileObj = null;
-            let foundPath = null;
+            let fileInfo = null;
+            let targetFilePath = null; // 最终要读取的文件路径
 
-            // 从映射目录查找（现在存储的是 File 对象）
-            for (const [path, file] of mappingDirFiles) {
-                if (path.endsWith(fileName) || path.includes(filePath)) {
-                    fileObj = file;
-                    foundPath = path;
-                    break;
+            // 策略 1：优先用绝对路径精确匹配（Electron 映射后的 absolutePath）
+            if (mappingDirFiles.has(filePath)) {
+                fileInfo = mappingDirFiles.get(filePath);
+                targetFilePath = fileInfo.absolutePath;
+            }
+
+            // 策略 2：用日志中的旧路径尝试匹配 relativePath
+            // 例如日志路径 "C:\old\path\function_calls.py" → 尝试匹配 "function_calls.py"
+            if (!fileInfo) {
+                // 提取文件名
+                const logFileName = filePath.split(/[\\/]/).pop();
+                
+                // 先用相对路径精确匹配
+                if (mappingDirFiles.has(logFileName)) {
+                    fileInfo = mappingDirFiles.get(logFileName);
+                    targetFilePath = fileInfo.absolutePath;
                 }
             }
 
-            // 如果找到了文件对象，延迟读取内容
-            if (fileObj) {
-                sourceViewerContent.innerHTML = '<div style="padding: 20px; text-align: center; color: #858585;">正在加载文件...</div>';
+            // 策略 3：如果还是没找到，尝试用文件名后缀模糊匹配
+            if (!fileInfo) {
+                const logFileName = filePath.split(/[\\/]/).pop();
                 
-                try {
-                    const content = await new Promise((resolve, reject) => {
-                        const reader = new FileReader();
-                        reader.onload = (e) => resolve(e.target.result);
-                        reader.onerror = (e) => reject(new Error('读取文件失败'));
-                        reader.readAsText(fileObj);
-                    });
+                for (const [key, info] of mappingDirFiles) {
+                    // 只匹配以文件名结尾的路径（避免误匹配）
+                    if (key.endsWith('\\' + logFileName) || key.endsWith('/' + logFileName) || key === logFileName) {
+                        fileInfo = info;
+                        targetFilePath = fileInfo.absolutePath;
+                        break;
+                    }
+                }
+            }
 
-                    // LRU 缓存管理：如果缓存已满，删除最旧的条目
+            // 策略 4：最后尝试用路径包含关系匹配（兼容性最好但可能不精确）
+            if (!fileInfo) {
+                const logFileName = filePath.split(/[\\/]/).pop();
+                
+                for (const [key, info] of mappingDirFiles) {
+                    if (info.absolutePath && info.absolutePath.endsWith(logFileName)) {
+                        fileInfo = info;
+                        targetFilePath = fileInfo.absolutePath;
+                        break;
+                    }
+                }
+            }
+
+            // 找到了映射文件，通过映射后的路径读取
+            if (fileInfo && targetFilePath) {
+                sourceViewerContent.innerHTML = '<div style="padding: 20px; text-align: center; color: #858585;">正在加载文件...</div>';
+
+                try {
+                    const content = await window.electronAPI.readFileContent(targetFilePath);
+
+                    // LRU 缓存管理
                     if (sourceFileCache.size >= MAX_CACHED_FILES) {
                         const firstKey = sourceFileCache.keys().next().value;
                         sourceFileCache.delete(firstKey);
                     }
-                    
+
                     sourceFileCache.set(filePath, content);
                     renderSourceContent(content, filePath, lineNumber);
                     return;
@@ -1084,57 +1095,119 @@
                 }
             }
 
-            // 显示加载提示和操作按钮
-            sourceViewerContent.innerHTML = `
-                <div style="padding: 20px; text-align: center;">
-                    <div style="color: #858585; margin-bottom: 15px;">
-                        文件路径: ${filePath}<br>
-                        目标行号: ${lineNumber}
-                    </div>
-                    <div style="color: #ce9178; margin-bottom: 15px;">
-                        未在映射目录中找到该文件<br>
-                        请点击下方按钮手动选择源文件
-                    </div>
-                    <button id="btn-load-file" style="
-                        background: #3498db;
-                        color: white;
-                        border: none;
-                        padding: 8px 20px;
-                        border-radius: 4px;
-                        cursor: pointer;
-                        font-size: 13px;
-                    ">📂 选择源文件</button>
-                </div>
-            `;
+            // ===== 未找到映射文件 =====
+            if (isElectron) {
+                // Electron 环境：直接通过主进程读取日志中的原始路径！
+                // 日志中的路径就是完整的绝对路径，主进程可以直接访问
+                sourceViewerContent.innerHTML = '<div style="padding: 20px; text-align: center; color: #858585;">正在尝试直接读取源文件...</div>';
 
-            document.getElementById('btn-load-file').addEventListener('click', () => {
-                const input = document.createElement('input');
-                input.type = 'file';
-                input.multiple = false;
-                input.accept = '.py';
+                try {
+                    const content = await window.electronAPI.readFileContent(filePath);
 
-                input.onchange = (e) => {
-                    const file = e.target.files[0];
-                    if (!file) return;
+                    // LRU 缓存管理
+                    if (sourceFileCache.size >= MAX_CACHED_FILES) {
+                        const firstKey = sourceFileCache.keys().next().value;
+                        sourceFileCache.delete(firstKey);
+                    }
 
-                    const reader = new FileReader();
-                    reader.onload = (event) => {
-                        const content = event.target.result;
-                        
-                        // LRU 缓存管理
-                        if (sourceFileCache.size >= MAX_CACHED_FILES) {
-                            const firstKey = sourceFileCache.keys().next().value;
-                            sourceFileCache.delete(firstKey);
+                    sourceFileCache.set(filePath, content);
+                    renderSourceContent(content, filePath, lineNumber);
+                    return;
+                } catch (error) {
+                    // 原始路径读取失败，提供手动选择文件的选项
+                    sourceViewerContent.innerHTML = `
+                        <div style="padding: 20px; text-align: center;">
+                            <div style="color: #858585; margin-bottom: 15px;">
+                                文件路径: ${filePath}<br>
+                                目标行号: ${lineNumber}
+                            </div>
+                            <div style="color: #ce9178; margin-bottom: 15px;">
+                                无法直接访问该文件（文件可能不存在或路径已变更）<br>
+                                请点击下方按钮手动选择源文件
+                            </div>
+                            <button id="btn-load-file" style="
+                                background: #3498db;
+                                color: white;
+                                border: none;
+                                padding: 8px 20px;
+                                border-radius: 4px;
+                                cursor: pointer;
+                                font-size: 13px;
+                            ">📂 选择源文件</button>
+                        </div>
+                    `;
+
+                    document.getElementById('btn-load-file').addEventListener('click', async () => {
+                        try {
+                            const result = await window.electronAPI.selectSourceFile();
+                            if (!result) return;
+
+                            // LRU 缓存管理
+                            if (sourceFileCache.size >= MAX_CACHED_FILES) {
+                                const firstKey = sourceFileCache.keys().next().value;
+                                sourceFileCache.delete(firstKey);
+                            }
+
+                            sourceFileCache.set(filePath, result.content);
+                            renderSourceContent(result.content, filePath, lineNumber);
+                        } catch (err) {
+                            sourceViewerContent.innerHTML = `<div style="padding: 20px; color: #f44747;">无法读取文件: ${err.message}</div>`;
                         }
-                        
-                        sourceFileCache.set(filePath, content);
-                        renderSourceContent(content, filePath, lineNumber);
-                    };
-                    reader.readAsText(file);
-                };
+                    });
+                }
+            } else {
+                // 浏览器环境：使用原生 file input
+                sourceViewerContent.innerHTML = `
+                    <div style="padding: 20px; text-align: center;">
+                        <div style="color: #858585; margin-bottom: 15px;">
+                            文件路径: ${filePath}<br>
+                            目标行号: ${lineNumber}
+                        </div>
+                        <div style="color: #ce9178; margin-bottom: 15px;">
+                            未在映射目录中找到该文件<br>
+                            请点击下方按钮手动选择源文件
+                        </div>
+                        <button id="btn-load-file" style="
+                            background: #3498db;
+                            color: white;
+                            border: none;
+                            padding: 8px 20px;
+                            border-radius: 4px;
+                            cursor: pointer;
+                            font-size: 13px;
+                        ">📂 选择源文件</button>
+                    </div>
+                `;
 
-                input.click();
-            });
+                document.getElementById('btn-load-file').addEventListener('click', () => {
+                    const input = document.createElement('input');
+                    input.type = 'file';
+                    input.multiple = false;
+                    input.accept = '.py';
+
+                    input.onchange = (e) => {
+                        const file = e.target.files[0];
+                        if (!file) return;
+
+                        const reader = new FileReader();
+                        reader.onload = (event) => {
+                            const content = event.target.result;
+
+                            // LRU 缓存管理
+                            if (sourceFileCache.size >= MAX_CACHED_FILES) {
+                                const firstKey = sourceFileCache.keys().next().value;
+                                sourceFileCache.delete(firstKey);
+                            }
+
+                            sourceFileCache.set(filePath, content);
+                            renderSourceContent(content, filePath, lineNumber);
+                        };
+                        reader.readAsText(file);
+                    };
+
+                    input.click();
+                });
+            }
         }
     </script>
 </body>
