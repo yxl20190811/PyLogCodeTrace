@@ -152,6 +152,29 @@
             background: #2980b9;
         }
 
+        /* 水平分割条（树窗口和文件查看窗口之间） */
+        .h-splitter {
+            width: 100%;
+            height: 6px;
+            background: #ddd;
+            cursor: row-resize;
+            transition: background 0.2s;
+            flex-shrink: 0;
+            display: none;
+        }
+
+        .h-splitter.visible {
+            display: block;
+        }
+
+        .h-splitter:hover {
+            background: #3498db;
+        }
+
+        .h-splitter.active {
+            background: #2980b9;
+        }
+
         /* 防止拖动时选中文本 */
         .container.dragging {
             user-select: none;
@@ -198,6 +221,7 @@
         }
 
         .stats {
+            display: none;
             padding: 8px 15px;
             background: #f8f9fa;
             border-top: 1px solid #ddd;
@@ -293,7 +317,8 @@
             flex-direction: column;
             background: #1e1e1e;
             border-top: 2px solid #3498db;
-            max-height: 50vh;
+            flex: 1;
+            min-height: 100px;
             overflow: hidden;
         }
 
@@ -403,7 +428,10 @@
                 <div class="empty-state">选择线程查看日志内容</div>
             </div>
             <div class="stats" id="log-stats"></div>
-            
+
+            <!-- 树窗口和文件查看窗口之间的分割条 -->
+            <div class="h-splitter" id="h-splitter"></div>
+
             <!-- 源代码查看器 -->
             <div class="source-viewer" id="source-viewer">
                 <div class="source-viewer-header">
@@ -442,7 +470,7 @@
         const sourceViewerContent = document.getElementById('source-viewer-content');
         const sourceViewerClose = document.getElementById('source-viewer-close');
 
-        // 可拖动分隔条
+        // 可拖动分隔条（垂直 - 左右面板）
         const splitter = document.getElementById('splitter');
         const leftPanel = document.getElementById('left-panel');
         let isDragging = false;
@@ -470,6 +498,44 @@
             if (isDragging) {
                 isDragging = false;
                 splitter.classList.remove('active');
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+            }
+        });
+
+        // 水平分割条（树窗口和文件查看窗口之间）
+        const hSplitter = document.getElementById('h-splitter');
+        let isHDragging = false;
+        let hStartY = 0;
+        let hStartHeight = 0;
+
+        hSplitter.addEventListener('mousedown', (e) => {
+            isHDragging = true;
+            hSplitter.classList.add('active');
+            hStartY = e.clientY;
+            hStartHeight = logContent.offsetHeight;
+            document.body.style.cursor = 'row-resize';
+            document.body.style.userSelect = 'none';
+            e.preventDefault();
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!isHDragging) return;
+            const delta = e.clientY - hStartY;
+            const newHeight = hStartHeight + delta;
+            const minHeight = 100;
+            const rightPanel = document.querySelector('.right-panel');
+            const maxHeight = rightPanel.offsetHeight - 150; // 给 source-viewer 留最小高度
+            if (newHeight >= minHeight && newHeight <= maxHeight) {
+                logContent.style.flex = 'none';
+                logContent.style.height = newHeight + 'px';
+            }
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (isHDragging) {
+                isHDragging = false;
+                hSplitter.classList.remove('active');
                 document.body.style.cursor = '';
                 document.body.style.userSelect = '';
             }
@@ -690,8 +756,8 @@
             renderTree(treeRoot, treeContainer);
             logContent.appendChild(treeContainer);
 
-            const totalNodes = countTreeNodes(treeRoot);
-            logStats.textContent = `共 ${totalNodes} 个节点`;
+            // 节点统计已移除，节省显示空间
+            logStats.textContent = '';
         }
 
         function buildCallTree(lines, threadIdRegex) {
@@ -960,6 +1026,7 @@
         // 源代码查看器相关功能
         sourceViewerClose.addEventListener('click', () => {
             sourceViewer.classList.remove('visible');
+            hSplitter.classList.remove('visible');
         });
 
         /**
@@ -1009,8 +1076,9 @@
          * @param {number} lineNumber - 要高亮的行号
          */
         async function showSourceFile(filePath, lineNumber) {
-            // 显示查看器
+            // 显示查看器和水平分割条
             sourceViewer.classList.add('visible');
+            hSplitter.classList.add('visible');
             sourceViewerTitle.textContent = `${filePath} (行 ${lineNumber})`;
             sourceViewerTitle.dataset.filePath = filePath;
             sourceViewerTitle.dataset.lineNumber = lineNumber;
