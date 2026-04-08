@@ -361,6 +361,7 @@
         }
 
         .source-viewer-content {
+            position: relative;   /* 使自身成为子行的 offsetParent，offsetTop 计算才正确 */
             flex: 1;
             overflow: auto;
             padding: 0;
@@ -1081,20 +1082,19 @@
             sourceViewerContent.innerHTML = '';
             sourceViewerContent.appendChild(fragment);
 
-            console.log(`[renderSourceContent] 已渲染 ${totalLines} 行`);
-            console.log(`[renderSourceContent] sourceViewerContent 子元素数量: ${sourceViewerContent.children.length}`);
-
             // 等待两帧确保容器从 display:none 切换后布局完全稳定，再滚动到高亮行
+            // 前提：.source-viewer-content 必须有 position:relative，否则 offsetTop 参照点错误
             requestAnimationFrame(() => {
                 requestAnimationFrame(() => {
                     const highlightedLine = sourceViewerContent.querySelector('.code-line.highlighted');
-                    if (highlightedLine) {
-                        const container = sourceViewerContent;
-                        const targetScrollTop = highlightedLine.offsetTop
-                            - (container.clientHeight / 2)
-                            + (highlightedLine.offsetHeight / 2);
-                        container.scrollTop = Math.max(0, targetScrollTop);
-                    }
+                    if (!highlightedLine) return;
+                    const container = sourceViewerContent;
+                    const targetScrollTop =
+                        highlightedLine.offsetTop
+                        - container.clientHeight / 2
+                        + highlightedLine.offsetHeight / 2;
+                    const maxScroll = Math.max(0, container.scrollHeight - container.clientHeight);
+                    container.scrollTop = Math.max(0, Math.min(targetScrollTop, maxScroll));
                 });
             });
         }
