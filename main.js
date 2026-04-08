@@ -169,8 +169,44 @@ ipcMain.handle('select-mapping-directory', async () => {
 ipcMain.handle('read-file-content', async (event, filePath) => {
   console.log('[main] read-file-content 收到路径:', filePath);
   try {
-    const content = fs.readFileSync(filePath, 'utf-8');
-    console.log('[main] 读取成功, 长度:', content.length);
+    const buffer = fs.readFileSync(filePath);
+    let content;
+
+    // 使用与读取日志文件相同的编码检测逻辑
+    if (buffer.length >= 2 && buffer[0] === 0xFF && buffer[1] === 0xFE) {
+      // UTF-16 LE BOM
+      content = buffer.slice(2).toString('utf16le');
+      console.log('[main] 检测到 UTF-16 LE BOM');
+    } else if (buffer.length >= 2 && buffer[0] === 0xFE && buffer[1] === 0xFF) {
+      // UTF-16 BE BOM
+      const swapped = Buffer.alloc(buffer.length - 2);
+      for (let i = 2; i < buffer.length; i += 2) {
+        swapped[i - 2] = buffer[i + 1];
+        swapped[i - 1] = buffer[i];
+      }
+      content = swapped.toString('utf16le');
+      console.log('[main] 检测到 UTF-16 BE BOM');
+    } else if (buffer.length >= 3 && buffer[0] === 0xEF && buffer[1] === 0xBB && buffer[2] === 0xBF) {
+      content = buffer.toString('utf8');
+      console.log('[main] 检测到 UTF-8 BOM');
+    } else {
+      // 没有 BOM，启发式检测
+      let zeroCount = 0;
+      const checkLen = Math.min(40, buffer.length - 1);
+      for (let i = 1; i < checkLen; i += 2) {
+        if (buffer[i] === 0) zeroCount++;
+      }
+      const threshold = checkLen / 4;
+      if (zeroCount > threshold) {
+        content = buffer.toString('utf16le');
+        console.log(`[main] 启发式检测: UTF-16 LE (偶数位零的比例: ${zeroCount}/${checkLen})`);
+      } else {
+        content = buffer.toString('utf8');
+        console.log(`[main] 启发式检测: UTF-8 (偶数位零的比例: ${zeroCount}/${checkLen})`);
+      }
+    }
+
+    console.log('[main] 读取成功, 长度:', content.length, '字符');
     return content;
   } catch (err) {
     console.error('[main] 读取文件失败:', err.message);
