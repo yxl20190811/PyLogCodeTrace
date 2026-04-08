@@ -1037,28 +1037,70 @@
          */
         function renderSourceContent(content, filePath, targetLine) {
             const lines = content.split('\n');
-            const startLine = Math.max(0, targetLine - 10);
-            const endLine = Math.min(lines.length, targetLine + 10);
+            // 显示完整文件内容
+            const startLine = 0;
+            const endLine = lines.length;
 
-            let html = '';
+            console.log(`[renderSourceContent] 文件: ${filePath}, 总行数: ${lines.length}, 目标行: ${targetLine}`);
+
+            // 使用 DocumentFragment 优化大量 DOM 插入
+            const fragment = document.createDocumentFragment();
+            const totalLines = endLine - startLine;
+            
             for (let i = startLine; i < endLine; i++) {
                 const lineNum = i + 1;
                 const lineContent = escapeHtml(lines[i] || '');
                 const isTarget = lineNum === parseInt(targetLine);
 
-                html += `<div class="code-line ${isTarget ? 'highlighted' : ''}" data-line="${lineNum}">
-                    <span class="line-number-gutter">${lineNum}</span>
-                    <span class="line-content">${lineContent}</span>
-                </div>`;
+                const lineDiv = document.createElement('div');
+                lineDiv.className = `code-line ${isTarget ? 'highlighted' : ''}`;
+                lineDiv.dataset.line = lineNum;
+
+                const gutterSpan = document.createElement('span');
+                gutterSpan.className = 'line-number-gutter';
+                gutterSpan.textContent = lineNum;
+
+                const contentSpan = document.createElement('span');
+                contentSpan.className = 'line-content';
+                contentSpan.textContent = lineContent;
+
+                lineDiv.appendChild(gutterSpan);
+                lineDiv.appendChild(contentSpan);
+                fragment.appendChild(lineDiv);
             }
 
-            sourceViewerContent.innerHTML = html;
+            // 清空并插入所有行
+            sourceViewerContent.innerHTML = '';
+            sourceViewerContent.appendChild(fragment);
 
-            // 滚动到高亮行
-            const highlightedLine = sourceViewerContent.querySelector('.code-line.highlighted');
-            if (highlightedLine) {
-                highlightedLine.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }
+            console.log(`[renderSourceContent] 已渲染 ${totalLines} 行`);
+            console.log(`[renderSourceContent] sourceViewerContent 子元素数量: ${sourceViewerContent.children.length}`);
+
+            // 延迟滚动，确保 DOM 已更新
+            requestAnimationFrame(() => {
+                const highlightedLine = sourceViewerContent.querySelector('.code-line.highlighted');
+                if (highlightedLine) {
+                    const container = sourceViewerContent;
+                    const targetTop = highlightedLine.offsetTop;
+                    const containerHeight = container.clientHeight;
+                    const lineHeight = highlightedLine.offsetHeight;
+                    
+                    // 计算高亮行的底部位置
+                    const lineBottom = targetTop + lineHeight;
+                    const currentScrollBottom = container.scrollTop + containerHeight;
+                    
+                    // 如果高亮行底部超出当前视图，滚动使其可见（保留上方空间）
+                    if (lineBottom > currentScrollBottom) {
+                        container.scrollTop = targetTop - containerHeight + (lineHeight * 3);
+                    } else if (targetTop < container.scrollTop) {
+                        // 如果高亮行在视图上方，直接滚动到该行
+                        container.scrollTop = Math.max(0, targetTop - lineHeight * 2);
+                    }
+                    
+                    console.log(`[renderSourceContent] 已滚动到高亮行 ${targetLine}, scrollTop: ${container.scrollTop}`);
+                    console.log(`[renderSourceContent] 容器高度: ${containerHeight}, 内容高度: ${container.scrollHeight}`);
+                }
+            });
         }
 
         /**
