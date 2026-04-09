@@ -1051,7 +1051,7 @@
                 return;
             }
 
-            const frames = parseStackTrace(stackContent);
+            const frames = parseStackTrace(stackContent).reverse();
             if (frames.length === 0) {
                 const empty = document.createElement('div');
                 empty.className = 'list-stack-empty';
