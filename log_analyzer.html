@@ -401,6 +401,179 @@
             flex: 1;
             white-space: pre;
         }
+
+        /* 视图模式切换按钮组 */
+        .right-panel .panel-title {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .view-mode-toggle {
+            display: flex;
+            gap: 2px;
+        }
+
+        .btn-mode {
+            background: transparent;
+            color: #555;
+            border: 1px solid #ccc;
+            padding: 2px 10px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s;
+            line-height: 1.6;
+        }
+
+        .btn-mode:hover {
+            background: #dde;
+            color: #333;
+        }
+
+        .btn-mode.active {
+            background: #2c3e50;
+            color: white;
+            border-color: #2c3e50;
+        }
+
+        /* 列表模式 - 每条消息的外层容器 */
+        .list-item-wrapper {
+            border-bottom: 1px solid #2a2a2a;
+        }
+
+        /* 列表模式消息行 */
+        .list-message-item {
+            display: flex;
+            align-items: baseline;
+            padding: 4px 15px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 13px;
+            color: #ce9178;
+            white-space: pre-wrap;
+            word-break: break-all;
+            line-height: 1.6;
+        }
+
+        .list-message-item:hover {
+            background: rgba(255, 255, 255, 0.04);
+        }
+
+        .list-message-item .list-seq {
+            display: inline-block;
+            min-width: 40px;
+            text-align: right;
+            margin-right: 8px;
+            color: #858585;
+            font-size: 12px;
+            user-select: none;
+            flex-shrink: 0;
+        }
+
+        /* 调用栈展开图标按钮 */
+        .btn-stack-icon {
+            background: none;
+            border: 1px solid transparent;
+            border-radius: 3px;
+            cursor: pointer;
+            padding: 0 4px;
+            margin-right: 6px;
+            font-size: 11px;
+            color: #6a9955;
+            opacity: 0.6;
+            transition: opacity 0.2s, border-color 0.2s, background 0.2s;
+            flex-shrink: 0;
+            line-height: 1.6;
+        }
+
+        .btn-stack-icon:hover {
+            opacity: 1;
+            border-color: #3498db;
+            background: rgba(52, 152, 219, 0.15);
+        }
+
+        .btn-stack-icon.active {
+            opacity: 1;
+            color: #3498db;
+            border-color: #3498db;
+            background: rgba(52, 152, 219, 0.2);
+        }
+
+        /* 内联调用栈面板 */
+        .list-stack-panel {
+            display: none;
+            background: #1a1a2e;
+            border-left: 3px solid #3498db;
+            margin: 0 15px 6px 70px;
+            padding: 6px 12px;
+            border-radius: 0 4px 4px 0;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 12px;
+        }
+
+        .list-stack-panel.visible {
+            display: block;
+        }
+
+        /* 每一帧 */
+        .list-stack-frame {
+            padding: 3px 0;
+            display: flex;
+            align-items: baseline;
+            gap: 6px;
+            color: #d4d4d4;
+            border-bottom: 1px solid rgba(255,255,255,0.04);
+        }
+
+        .list-stack-frame:last-child {
+            border-bottom: none;
+        }
+
+        .stack-frame-idx {
+            color: #858585;
+            font-size: 11px;
+            min-width: 20px;
+            text-align: right;
+            flex-shrink: 0;
+            user-select: none;
+        }
+
+        .stack-frame-func {
+            color: #dcdcaa;
+            font-weight: bold;
+            flex-shrink: 0;
+        }
+
+        .stack-frame-loc {
+            color: #6a9955;
+            font-size: 11px;
+        }
+
+        .stack-frame-dir {
+            color: #808080;
+        }
+
+        .stack-frame-filename {
+            color: #dcdcaa;
+            font-weight: bold;
+            cursor: pointer;
+            text-decoration: underline;
+        }
+
+        .stack-frame-filename:hover {
+            color: #3498db;
+        }
+
+        .stack-frame-lineno {
+            color: #f44747;
+            font-weight: bold;
+        }
+
+        .list-stack-empty {
+            color: #858585;
+            font-style: italic;
+            padding: 2px 0;
+        }
     </style>
 </head>
 <body>
@@ -424,7 +597,13 @@
         <div class="splitter" id="splitter"></div>
 
         <div class="right-panel">
-            <div class="panel-title">日志内容</div>
+            <div class="panel-title">
+                <span>日志内容</span>
+                <div class="view-mode-toggle" id="view-mode-toggle">
+                    <button class="btn-mode active" id="btn-mode-tree" title="树形显示">🌲 树</button>
+                    <button class="btn-mode" id="btn-mode-list" title="列表显示">📋 列表</button>
+                </div>
+            </div>
             <div class="log-content" id="log-content">
                 <div class="empty-state">选择线程查看日志内容</div>
             </div>
@@ -454,6 +633,7 @@
         let allLines = [];
         let threadMap = new Map();
         let selectedThread = null;
+        let currentViewMode = 'tree'; // 'tree' | 'list'
         let sourceFileCache = new Map(); // 缓存已读取的源文件
         let mappingDirFiles = new Map(); // 映射目录文件缓存（Electron: {relativePath: {absolutePath, fileName, size}}）
         const MAX_CACHED_FILES = 50; // LRU 缓存最大文件数
@@ -470,6 +650,21 @@
         const sourceViewerTitle = document.getElementById('source-viewer-title');
         const sourceViewerContent = document.getElementById('source-viewer-content');
         const sourceViewerClose = document.getElementById('source-viewer-close');
+        const btnModeTree = document.getElementById('btn-mode-tree');
+        const btnModeList = document.getElementById('btn-mode-list');
+
+        // 视图模式切换
+        function setViewMode(mode) {
+            currentViewMode = mode;
+            btnModeTree.classList.toggle('active', mode === 'tree');
+            btnModeList.classList.toggle('active', mode === 'list');
+            if (selectedThread !== null) {
+                renderLogContent(selectedThread);
+            }
+        }
+
+        btnModeTree.addEventListener('click', () => setViewMode('tree'));
+        btnModeList.addEventListener('click', () => setViewMode('list'));
 
         // 可拖动分隔条（垂直 - 左右面板）
         const splitter = document.getElementById('splitter');
@@ -749,16 +944,177 @@
                 return;
             }
 
+            if (currentViewMode === 'list') {
+                renderLogContentList(lines);
+            } else {
+                renderLogContentTree(lines);
+            }
+            logStats.textContent = '';
+        }
+
+        function renderLogContentTree(lines) {
             const threadIdRegex = /^tid:(\d+)\|/;
             const treeRoot = buildCallTree(lines, threadIdRegex);
-            
             const treeContainer = document.createElement('div');
             treeContainer.className = 'tree-container';
             renderTree(treeRoot, treeContainer);
             logContent.appendChild(treeContainer);
+        }
 
-            // 节点统计已移除，节省显示空间
-            logStats.textContent = '';
+        function renderLogContentList(lines) {
+            const threadIdRegex = /^tid:(\d+)\|/;
+            const fragment = document.createDocumentFragment();
+            let seq = 0;
+            let lastStackContent = null; // 记录紧邻消息行之前的调用栈原始字符串
+
+            for (const line of lines) {
+                const match = line.match(threadIdRegex);
+                if (!match) continue;
+                const content = line.substring(match[0].length).trim();
+
+                // 调用栈行：更新 lastStackContent 后跳过
+                if (content.includes('@') && content.includes('#')) {
+                    lastStackContent = content;
+                    continue;
+                }
+                if (content === '') continue;
+
+                seq++;
+                const capturedStack = lastStackContent; // 闭包捕获
+
+                // --- 外层 wrapper ---
+                const wrapper = document.createElement('div');
+                wrapper.className = 'list-item-wrapper';
+
+                // --- 消息行 ---
+                const item = document.createElement('div');
+                item.className = 'list-message-item';
+
+                // 调用栈展开图标
+                const stackBtn = document.createElement('button');
+                stackBtn.className = 'btn-stack-icon';
+                stackBtn.title = '展开/收起调用栈';
+                stackBtn.textContent = '⋮';
+
+                // 序号
+                const seqSpan = document.createElement('span');
+                seqSpan.className = 'list-seq';
+                seqSpan.textContent = seq;
+
+                // 消息文本
+                const msgSpan = document.createElement('span');
+                msgSpan.textContent = content;
+
+                item.appendChild(stackBtn);
+                item.appendChild(seqSpan);
+                item.appendChild(msgSpan);
+
+                // --- 内联调用栈面板（懒渲染） ---
+                const stackPanel = document.createElement('div');
+                stackPanel.className = 'list-stack-panel';
+                let stackRendered = false;
+
+                stackBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const visible = stackPanel.classList.toggle('visible');
+                    stackBtn.classList.toggle('active', visible);
+
+                    // 第一次展开时才渲染帧列表
+                    if (visible && !stackRendered) {
+                        stackRendered = true;
+                        renderStackPanel(stackPanel, capturedStack);
+                    }
+                });
+
+                wrapper.appendChild(item);
+                wrapper.appendChild(stackPanel);
+                fragment.appendChild(wrapper);
+            }
+
+            if (seq === 0) {
+                logContent.innerHTML = '<div class="empty-state">该线程无用户消息</div>';
+                return;
+            }
+
+            logContent.appendChild(fragment);
+        }
+
+        /**
+         * 将调用栈字符串渲染到 stackPanel 容器中，每帧文件名可点击打开源码
+         */
+        function renderStackPanel(panel, stackContent) {
+            if (!stackContent) {
+                const empty = document.createElement('div');
+                empty.className = 'list-stack-empty';
+                empty.textContent = '无调用栈信息';
+                panel.appendChild(empty);
+                return;
+            }
+
+            const frames = parseStackTrace(stackContent);
+            if (frames.length === 0) {
+                const empty = document.createElement('div');
+                empty.className = 'list-stack-empty';
+                empty.textContent = '调用栈解析为空';
+                panel.appendChild(empty);
+                return;
+            }
+
+            frames.forEach((frame, idx) => {
+                const frameEl = document.createElement('div');
+                frameEl.className = 'list-stack-frame';
+
+                // 帧序号
+                const idxSpan = document.createElement('span');
+                idxSpan.className = 'stack-frame-idx';
+                idxSpan.textContent = idx;
+                frameEl.appendChild(idxSpan);
+
+                // 函数名
+                const funcSpan = document.createElement('span');
+                funcSpan.className = 'stack-frame-func';
+                funcSpan.textContent = frame.name;
+                frameEl.appendChild(funcSpan);
+
+                // 文件位置（可点击）
+                if (frame.filePath) {
+                    const locSpan = document.createElement('span');
+                    locSpan.className = 'stack-frame-loc';
+
+                    const pathParts = frame.filePath.split(/[\\/]/);
+                    const fileName = pathParts.pop();
+                    const dirPath = pathParts.join('/');
+
+                    // 目录部分（灰色，不可点击）
+                    if (dirPath) {
+                        const dirSpan = document.createElement('span');
+                        dirSpan.className = 'stack-frame-dir';
+                        dirSpan.textContent = '(' + dirPath + '/';
+                        locSpan.appendChild(dirSpan);
+                    } else {
+                        locSpan.appendChild(document.createTextNode('('));
+                    }
+
+                    // 文件名（黄色，可点击）
+                    const fileSpan = document.createElement('span');
+                    fileSpan.className = 'stack-frame-filename';
+                    fileSpan.textContent = fileName;
+                    fileSpan.addEventListener('click', () => {
+                        showSourceFile(frame.filePath, frame.lineNum);
+                    });
+                    locSpan.appendChild(fileSpan);
+
+                    // 行号（红色）
+                    const lineSpan = document.createElement('span');
+                    lineSpan.className = 'stack-frame-lineno';
+                    lineSpan.textContent = ':' + frame.lineNum + ')';
+                    locSpan.appendChild(lineSpan);
+
+                    frameEl.appendChild(locSpan);
+                }
+
+                panel.appendChild(frameEl);
+            });
         }
 
         function buildCallTree(lines, threadIdRegex) {
